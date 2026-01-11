@@ -20,9 +20,9 @@ webpush.setVapidDetails(
 
 let subscriptions = [];
 const SYMBOLS = process.env.CRYPTO_SYMBOLS.split(',');
-const TIMEFRAME = '1h'; // PERİYOT BURADAN AYARLANIR (1 Saat)
 let marketData = {};
 let sentAlerts = {};
+const TIMEFRAMES = ['1h', '4h']; // Takip edilecek periyotlar
 
 const exchange = new ccxt.binance({ 'enableRateLimit': true });
 
@@ -35,118 +35,134 @@ const transporter = nodemailer.createTransport({
 });
 
 // Bildirim Fonksiyonları
-async function sendPushNotification(symbol, stochK) {
+async function sendPushNotification(symbol, stochK, tf) { // tf eklendi
     const payload = JSON.stringify({
         title: `🚨 ${symbol} SİNYALİ!`,
-        body: `Stoch RSI: ${stochK} (${TIMEFRAME}) yönü yukarı döndü!`
+        body: `Stoch RSI: ${stochK} (${tf}) yönü yukarı döndü!` // TIMEFRAME yerine tf
     });
     subscriptions.forEach(sub => {
         webpush.sendNotification(sub, payload).catch(e => console.error("Push Hatası:", e.message));
     });
 }
 
-async function sendAlertEmail(symbol, stochK, price) {
+// E-posta Bildirimi
+async function sendAlertEmail(symbol, stochK, price, tf) { // tf eklendi
     const mailOptions = {
         from: process.env.EMAIL_USER,
         to: process.env.EMAIL_TO,
-        subject: `🚨 ${symbol} Dipte!`,
-        text: `${symbol} şu an ${price} TRY seviyesinde. Stoch RSI (${TIMEFRAME}) değeri ${stochK} ile aşırı satım bölgesinde.`    };
+        subject: `🚨 ${symbol} Dipte! (${tf})`, // tf eklendi
+        text: `${symbol} şu an ${price} TRY seviyesinde. Stoch RSI (${tf}) değeri ${stochK} ile aşırı satım bölgesinde.`
+    };
     try {
         await transporter.sendMail(mailOptions);
-        console.log(`E-posta gönderildi: ${symbol}`);
+        console.log(`E-posta gönderildi: ${symbol} (${tf})`);
     } catch (error) { console.error("Mail Hatası:", error); }
 }
 
 async function checkMarkets() {
     try {
-        marketData = {};
         const tickers = await exchange.fetchTickers(SYMBOLS).catch(() => null);
         if (!tickers) return;
 
         for (const symbol of SYMBOLS) {
-            await new Promise(resolve => setTimeout(resolve, 500)); // her sembol arası 0.5 sn bekle
-            // 1 saatlik mumları çekiyoruz
-            const ohlcv = await exchange.fetchOHLCV(symbol, TIMEFRAME, undefined, 100);
-            const closes = ohlcv.map(c => c[4]);
-            const results = StochasticRSI.calculate({ values: closes, rsiPeriod: 14, stochasticPeriod: 14, kPeriod: 3, dPeriod: 3 });
-
-            if (results.length < 2) continue;
-
-            const currentK = results[results.length - 1].k;
-            const prevK = results[results.length - 2].k;
+            marketData[symbol] = marketData[symbol] || { price: '...', change: 0, time: '...', intervals: {} };
             const ticker = tickers[symbol];
 
-// Yön tayini
-            const trendDirection = currentK >= prevK ? 'up' : 'down';
+            marketData[symbol].price = ticker ? ticker.last : 'N/A';
+            marketData[symbol].change = ticker ? ticker.percentage : 0;
+            marketData[symbol].time = new Date().toLocaleTimeString('tr-TR');
 
-            // YÖN BAZLI RENKLER
-            // Yukarı ivme (Yeşil tonu), Aşağı ivme (Kırmızı tonu)
-            const activeColor = trendDirection === 'up' ? '#00e676' : '#ff4b2b';
+            for (const tf of TIMEFRAMES) {
+                await new Promise(resolve => setTimeout(resolve, 300)); // API kısıtlaması için kısa bekleme
 
-            // Arka plan için çok şeffaf hali
-            const boxBgColor = trendDirection === 'up' ? 'rgba(0, 230, 118, 0.12)' : 'rgba(255, 75, 43, 0.12)';
-            const trendArrow = trendDirection === 'up' ? '↗' : '↘';
+                const ohlcv = await exchange.fetchOHLCV(symbol, tf, undefined, 100);
+                const closes = ohlcv.map(c => c[4]);
+                const results = StochasticRSI.calculate({
+                    values: closes, rsiPeriod: 14, stochasticPeriod: 14, kPeriod: 3, dPeriod: 3
+                });
 
-            // Bildirim Mantığı (15'in altı ve 30 dk arayla)
+                if (results.length < 2) continue;
 
+                const currentK = results[results.length - 1].k;
+                const prevK = results[results.length - 2].k;
+                const trendDirection = currentK >= prevK ? 'up' : 'down';
 
-            marketData[symbol] = {
-                price: ticker ? ticker.last : 'N/A',
-                change: ticker ? ticker.percentage : 0,
-                stochK: currentK.toFixed(2),
-                trendArrow,
-                boxBg: boxBgColor,
-                time: new Date().toLocaleTimeString('tr-TR'),
-                status: currentK < 15 ? "⚠️ AŞIRI SATIM" : (currentK > 85 ? "🚀 AŞIRI ALIM" : "Normal"),
-                // RAKAM VE BADGE RENGİ ARTIK YÖNE GÖRE BELİRLENİYOR
-                stochColor: activeColor,
-                changeColor: (ticker && ticker.percentage >= 0) ? "#00e676" : "#ff4b2b"
-            };
-            if (currentK < 15) {
-                const now = Date.now();
-                // 1 saatlik periyot daha hızlı olduğu için bildirim aralığını 30 dk tutmak mantıklı
-                if (!sentAlerts[symbol] || (now - sentAlerts[symbol] > 30 * DAKIKA)) {
-                    await sendPushNotification(symbol, currentK.toFixed(2));
-                    await sendAlertEmail(symbol, currentK.toFixed(2), ticker ? ticker.last : 'N/A');
-                    sentAlerts[symbol] = now;
+                // Veriyi periyoda göre kaydet
+                marketData[symbol].intervals[tf] = {
+                    stochK: currentK.toFixed(2),
+                    trendArrow: trendDirection === 'up' ? '↗' : '↘',
+                    color: trendDirection === 'up' ? '#00e676' : '#ff4b2b',
+                    bgColor: trendDirection === 'up' ? 'rgba(0, 230, 118, 0.12)' : 'rgba(255, 75, 43, 0.12)',
+                    status: currentK < 15 ? "⚠️ SATIM" : (currentK > 85 ? "🚀 ALIM" : "Normal")
+                };
+
+                // Sadece 1h periyodu için bildirim gönder (veya isteğe göre 4h eklenebilir)
+                if (tf === '1h' && currentK < 15) {
+                    const now = Date.now();
+                    if (!sentAlerts[symbol] || (now - sentAlerts[symbol] > 30 * DAKIKA)) {
+                        // TIMEFRAME yerine tf kullanıyoruz:
+                        await sendPushNotification(symbol, currentK.toFixed(2), tf);
+                        await sendAlertEmail(symbol, currentK.toFixed(2), ticker ? ticker.last : 'N/A', tf);
+                        sentAlerts[symbol] = now;
+                    }
                 }
             }
-
         }
     } catch (e) { console.error("Döngü hatası:", e.message); }
 }
-function  responseHtml(res){
+function responseHtml(res) {
     let cardsHtml = '';
     SYMBOLS.forEach(symbol => {
-        const data = marketData[symbol] || { price: '...', change: 0, stochK: '...', boxBg: '#1c1c1c', stochColor: '#666', changeColor: '#666', trendArrow: '' };
+        const data = marketData[symbol];
 
-        // Sembolü link formatına çevir (Örn: OG/TRY -> OG_TRY)
+        // GÜVENLİK KONTROLÜ: Veri henüz yüklenmediyse bekleme kartı göster
+        if (!data || !data.intervals || !data.intervals['1h'] || !data.intervals['4h']) {
+            cardsHtml += `
+                <div class="card">
+                    <div class="symbol-header">${symbol}</div>
+                    <div style="padding: 20px;">Veriler yükleniyor...</div>
+                </div>`;
+            return;
+        }
+
         const symbolCode = symbol.replace('/', '_');
-        const tradeUrl = `https://www.trbinance.com/trade/${symbolCode}`;
+        const tradeUrl = `https://www.binance.com/en-TR/trade/${symbolCode}?_from=markets&type=spot`;
+        const symbolCodeTr = symbol.replace('/', '_').replace('USDT', 'TRY');
+        const tradeUrlTr = `https://www.binance.tr/tr/trade/${symbolCodeTr}`;
+
+        let intervalBoxes = '';
+        TIMEFRAMES.forEach(tf => {
+            const tfData = data.intervals[tf];
+            // tfData var mı kontrolü (ekstra güvenlik)
+            if (tfData) {
+                intervalBoxes += `
+                    <div class="indicator-box" style="background-color: ${tfData.bgColor}; border: 1px solid ${tfData.color}44; margin-bottom: 8px; padding: 10px; border-radius: 12px;">
+                        <div class="stoch-label" style="color: #888; font-size: 0.7rem; font-weight: bold;">STOCH RSI (${tf}) ${tfData.trendArrow}</div>
+                        <div class="value" style="color: ${tfData.color}; font-size: 1.6rem; font-weight: 900; margin: 5px 0;">${tfData.stochK}</div>
+                        <div class="status-badge" style="border: 1px solid ${tfData.color}; color: ${tfData.color}; font-size: 0.6rem; padding: 2px 5px; border-radius: 5px; display: inline-block;">
+                            ${tfData.status}
+                        </div>
+                    </div>`;
+            }
+        });
 
         cardsHtml += `
-            <div class="card ${data.stochK < 15 ? 'alert-border' : ''}">
+            <div class="card ${data.intervals['1h'].stochK < 15 ? 'alert-border' : ''}">
                 <div class="symbol-header">
-                    <a href="${tradeUrl}" target="_blank" style="color: #888; text-decoration: none; border-bottom: 1px dashed #444;">
-                        ${symbol}
-                    </a>
+                    <a href="${tradeUrlTr}" target="_blank" style="color: #f3ba2f; text-decoration: none; font-weight: bold;">${symbol}</a>
+                    <a href="${tradeUrl}"  target="_blank" style="text-decoration: none">🌐</a>
                 </div>
-                <div class="price">${data.price} <small>TRY</small></div>
-                <div class="change" style="color: ${data.changeColor}">${data.change >= 0 ? '▲' : '▼'} %${Number(data.change).toFixed(2)}</div>
-                
-                <div class="indicator-box" style="background-color: ${data.boxBg}; border: 1px solid ${data.stochColor}44;">
-                    <div class="stoch-label" style="color: #666;">STOCH RSI (${TIMEFRAME}) ${data.trendArrow}</div>
-                    <div class="value" style="color: ${data.stochColor}; transition: all 0.5s;">${data.stochK}</div>
-                    <div class="status-badge" style="border-color: ${data.stochColor}; color: ${data.stochColor}; background: rgba(0,0,0,0.3);">
-                        ${data.status}
-                    </div>
+                <div class="price" style="font-size: 1.2rem; margin: 10px 0;">${data.price} <small style="font-size: 0.7rem;">TRY</small></div>
+                <div class="change" style="color: ${data.change >= 0 ? '#00e676' : '#ff4b2b'}; font-size: 0.9rem; margin-bottom: 10px;">
+                    ${data.change >= 0 ? '▲' : '▼'} %${Number(data.change).toFixed(2)}
                 </div>
-                
-                <div class="footer">Son: ${data.time}</div>
+                ${intervalBoxes}
+                <div class="footer" style="font-size: 0.6rem; color: #555; margin-top: 10px;">Son: ${data.time}</div>
             </div>`;
     });
-    res.send(`<!DOCTYPE html><html lang="tr"><head><title>Crypto Bot 1H</title><meta http-equiv="refresh" content="30"><style>body{font-family:sans-serif;background:#050505;color:white;display:flex;flex-direction:column;align-items:center;padding:20px;}.container{display:flex;gap:15px;flex-wrap:wrap;justify-content:center;}.card{background:#111;padding:20px;border-radius:20px;border:1px solid #222;width:230px;text-align:center;}.alert-border{border:1px solid #ff4b2b;box-shadow:0 0 15px rgba(255,75,43,0.3);}.indicator-box{padding:15px;border-radius:15px;margin-top:10px;transition:0.3s;}.value{font-size:2.8rem;font-weight:900;}.status-badge{font-size:0.6rem;border:1px solid;padding:2px 6px;border-radius:10px;}button{background:#f3ba2f;border:none;padding:10px;border-radius:8px;font-weight:bold;cursor:pointer;margin-bottom:20px;}</style></head><body><h1>MARKET INTELLIGENCE (1H)</h1><button onclick="subscribe()">🔔 Bildirimleri Etkinleştir</button><div class="container">${cardsHtml}</div><script>async function subscribe(){const r=await navigator.serviceWorker.register('/sw.js');const s=await r.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:'${process.env.VAPID_PUBLIC_KEY}'});await fetch('/subscribe',{method:'POST',body:JSON.stringify(s),headers:{'content-type':'application/json'}});alert('Aktif!')}</script></body></html>`);
 
+    // Stil kısmını da içerecek şekilde HTML'i gönderin
+    res.send(`<!DOCTYPE html><html lang="tr"><head><title>Crypto Bot 1H/4H</title><meta http-equiv="refresh" content="30"><style>body{font-family:sans-serif;background:#050505;color:white;display:flex;flex-direction:column;align-items:center;padding:20px;}.container{display:flex;gap:15px;flex-wrap:wrap;justify-content:center;}.card{background:#111;padding:15px;border-radius:20px;border:1px solid #222;width:200px;text-align:center;}.alert-border{border:1px solid #ff4b2b;box-shadow:0 0 15px rgba(255,75,43,0.3);}</style></head><body><h1>MARKET INTELLIGENCE</h1><div class="container">${cardsHtml}</div></body></html>`);
 }
 // 1 saatlik periyotta veriler daha sık değiştiği için kontrolü yine 2 dakikada bir yapıyoruz
 setInterval(checkMarkets, 2 * DAKIKA);
