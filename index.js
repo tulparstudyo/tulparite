@@ -36,6 +36,7 @@ const transporter = nodemailer.createTransport({
 
 // Bildirim Fonksiyonları
 async function sendPushNotification(symbol, stochK, tf) { // tf eklendi
+
     const payload = JSON.stringify({
         title: `🚨 ${symbol} SİNYALİ!`,
         body: `Stoch RSI: ${stochK} (${tf}) yönü yukarı döndü!` // TIMEFRAME yerine tf
@@ -47,11 +48,14 @@ async function sendPushNotification(symbol, stochK, tf) { // tf eklendi
 
 // E-posta Bildirimi
 async function sendAlertEmail(symbol, stochK, price, tf) { // tf eklendi
+    const symbolCodeTr = symbol.replace('/', '_').replace('USDT', 'TRY');
+    const tradeUrlTr = `https://www.binance.tr/tr/trade/${symbolCodeTr}`;
     const mailOptions = {
         from: process.env.EMAIL_USER,
         to: process.env.EMAIL_TO,
         subject: `🚨 ${symbol} Dipte! (${tf})`, // tf eklendi
-        text: `${symbol} şu an ${price} TRY seviyesinde. Stoch RSI (${tf}) değeri ${stochK} ile aşırı satım bölgesinde.`
+        text: `${symbol} şu an ${price} TRY seviyesinde. Stoch RSI (${tf}) değeri ${stochK} ile aşırı satım bölgesinde. ${tradeUrlTr} `,
+        html: `<a href="${tradeUrlTr}">${symbol}</a> şu an ${price} TRY seviyesinde. Stoch RSI (${tf}) değeri ${stochK} ile aşırı satım bölgesinde.`
     };
     try {
         await transporter.sendMail(mailOptions);
@@ -71,7 +75,10 @@ async function checkMarkets() {
             marketData[symbol].price = ticker ? ticker.last : 'N/A';
             marketData[symbol].change = ticker ? ticker.percentage : 0;
             marketData[symbol].time = new Date().toLocaleTimeString('tr-TR');
-
+            let sendAlertH1 = false;
+            let sendAlertH4 = false;
+            let alertK= 0;
+            let alertTf= 0;
             for (const tf of TIMEFRAMES) {
                 await new Promise(resolve => setTimeout(resolve, 300)); // API kısıtlaması için kısa bekleme
 
@@ -97,14 +104,24 @@ async function checkMarkets() {
                 };
 
                 // Sadece 1h periyodu için bildirim gönder (veya isteğe göre 4h eklenebilir)
-                if (tf === '1h' && currentK < 15) {
-                    const now = Date.now();
-                    if (!sentAlerts[symbol] || (now - sentAlerts[symbol] > 30 * DAKIKA)) {
-                        // TIMEFRAME yerine tf kullanıyoruz:
-                        await sendPushNotification(symbol, currentK.toFixed(2), tf);
-                        await sendAlertEmail(symbol, currentK.toFixed(2), ticker ? ticker.last : 'N/A', tf);
-                        sentAlerts[symbol] = now;
-                    }
+                if (tf === '1h' && currentK < 50) {
+                    sendAlertH1 = true;
+                    alertK = currentK;
+                    alertTf = tf;
+                }
+                if (tf === '4h' && currentK < 50) {
+                    sendAlertH4 = true;
+                    alertK = currentK;
+                    alertTf = tf;
+                }
+            }
+            if(sendAlertH1 && sendAlertH4){
+                const now = Date.now();
+                if (!sentAlerts[symbol] || (now - sentAlerts[symbol] > 30 * DAKIKA)) {
+                    // TIMEFRAME yerine tf kullanıyoruz:
+                    await sendPushNotification(symbol, alertK.toFixed(2), alertTf);
+                    await sendAlertEmail(symbol, alertK.toFixed(2), ticker ? ticker.last : 'N/A', alertTf);
+                    sentAlerts[symbol] = now;
                 }
             }
         }
