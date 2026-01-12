@@ -20,6 +20,7 @@ webpush.setVapidDetails(
 
 let subscriptions = [];
 const SYMBOLS = process.env.CRYPTO_SYMBOLS.split(',');
+const RSI_ALERT_MIN = process.env.RSI_ALERT_MIN;
 let marketData = {};
 let sentAlerts = {};
 const TIMEFRAMES = ['1h', '4h']; // Takip edilecek periyotlar
@@ -104,12 +105,12 @@ async function checkMarkets() {
                 };
 
                 // Sadece 1h periyodu için bildirim gönder (veya isteğe göre 4h eklenebilir)
-                if (tf === '1h' && currentK < 50) {
+                if (tf === '1h' && currentK < RSI_ALERT_MIN) {
                     sendAlertH1 = true;
                     alertK = currentK;
                     alertTf = tf;
                 }
-                if (tf === '4h' && currentK < 50) {
+                if (tf === '4h' && currentK < RSI_ALERT_MIN) {
                     sendAlertH4 = true;
                     alertK = currentK;
                     alertTf = tf;
