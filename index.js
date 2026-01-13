@@ -143,6 +143,7 @@ function responseHtml(res) {
             return;
         }
 
+        const symbolImage = symbol.replace('/', '');
         const symbolCode = symbol.replace('/', '_');
         const tradeUrl = `https://www.binance.com/en-TR/trade/${symbolCode}?_from=markets&type=spot`;
         const symbolCodeTr = symbol.replace('/', '_').replace('USDT', 'TRY');
@@ -175,6 +176,7 @@ function responseHtml(res) {
                     ${data.change >= 0 ? '▲' : '▼'} %${Number(data.change).toFixed(2)}
                 </div>
                 ${intervalBoxes}
+                <div class="image" ><img style="zoom: 2.3;" src="https://www.binance.tr/proxy/bin/kline/${symbolImage}.svg" alt="BTC_TRY" class="css-fuad0h"></div>
                 <div class="footer" style="font-size: 0.6rem; color: #555; margin-top: 10px;">Son: ${data.time}</div>
             </div>`;
     });
