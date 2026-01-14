@@ -182,7 +182,7 @@ function responseHtml(res) {
     });
 
     // Stil kısmını da içerecek şekilde HTML'i gönderin
-    res.send(`<!DOCTYPE html><html lang="tr"><head><title>Crypto Bot 1H/4H</title><meta http-equiv="refresh" content="30"><style>body{font-family:sans-serif;background:#050505;color:white;display:flex;flex-direction:column;align-items:center;padding:0px 20px;}.container{display:flex;gap:15px;flex-wrap:wrap;justify-content:center;width:100%;}.card{background:#111;padding:15px;border-radius:20px;border:1px solid #222;width:25%;text-align:center;}.alert-border{border:1px solid #ff4b2b;box-shadow:0 0 15px rgba(255,75,43,0.3);}.image{max-height: 84px;overflow: hidden;}.image img{zoom:2.7}</style></head><body><h1>MARKET INTELLIGENCE</h1><div class="container">${cardsHtml}</div></body></html>`);
+    res.send(`<!DOCTYPE html><html lang="tr"><head><title>Crypto Bot 1H/4H</title><meta http-equiv="refresh" content="30"><style>body{font-family:sans-serif;background:#050505;color:white;display:flex;flex-direction:column;align-items:center;padding:0px 20px;}.container{display:flex;gap:15px;flex-wrap:wrap;justify-content:center;width:100%;}.card{background:#111;padding:15px;border-radius:20px;border:1px solid #222;width:25%;text-align:center;}.alert-border{border:1px solid #ff4b2b;box-shadow:0 0 15px rgba(255,75,43,0.3);}.image{max-height: 84px;overflow: hidden;}.image img{zoom:2.5}</style></head><body><h1>MARKET INTELLIGENCE</h1><div class="container">${cardsHtml}</div></body></html>`);
 }
 // 1 saatlik periyotta veriler daha sık değiştiği için kontrolü yine 2 dakikada bir yapıyoruz
 setInterval(checkMarkets, 2 * DAKIKA);
